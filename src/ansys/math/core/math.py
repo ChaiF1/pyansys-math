@@ -480,6 +480,24 @@ class AnsMath:
             raise TypeError("``name`` parameter must be a string")
 
         from scipy import sparse
+        from numpy import count_nonzero
+
+        # Handle empty matrices by using zeros() instead of sending data
+        if sparse.issparse(matrix):
+            if count_nonzero(matrix.data) == 0:
+                # Empty sparse matrix - use zeros to avoid gRPC crash
+                nrow, ncol = matrix.shape
+                # Ensure dtype is one of the supported types
+                if hasattr(matrix, 'dtype'):
+                    dtype_type = matrix.dtype.type
+                    if dtype_type not in MYCTYPE:
+                        # Default to np.double if dtype not supported
+                        dtype = np.double
+                    else:
+                        dtype = dtype_type
+                else:
+                    dtype = np.double
+                return self.zeros(nrow, ncol)
 
         self._set_mat(name, matrix, triu)
         if sparse.issparse(matrix):
@@ -1181,7 +1199,6 @@ class AnsMath:
         if dtype is not None:
             if arr.dtype != dtype:
                 arr = arr.astype(dtype)
-
         if arr.dtype not in list(MYCTYPE.keys()):
             raise TypeError(
                 f"Invalid array data type {arr.dtype}\n."
@@ -1406,14 +1423,20 @@ class AnsMathObj:
         """
         if not hasattr(obj, "id"):
             raise TypeError("The object to be added must be an AnsMath object.")
-        
+
         # Check if the object in question is a matrix or a vector
         if hasattr(obj, "ncol"):
             if (self.ncol != obj.ncol) or (self.nrow != obj.nrow):
-                raise ValueError("The objects to be added have unequal dimensions")
-        else:  
+                raise ValueError(f"The objects to be added have unequal"
+                                 " dimensions.\n"
+                                 f"Self: {self.nrow} by {self.ncol}\n"
+                                 f"Object: {obj.nrow} by {obj.ncol}")
+        else:
             if self.size != obj.size:
-                raise ValueError("The objects to be added have unequal dimension")
+                raise ValueError(f"The objects to be added have unequal"
+                                 f" dimension\n"
+                                 f"Self: {self.size}\n"
+                                 f"Object: {obj.size}")
 
         self._mapdl._log.info("Call MAPDL to perform an AXPY operation.")
         self._mapdl.run(f"*AXPY,{val1},0,{obj.id},{val2},0,{self.id}", mute=True)
@@ -2013,7 +2036,7 @@ class AnsSolver(AnsMathObj):
 def rand(obj):
     """Set all values of an AnsMath object to random values.
 
-    Parameters
+    Parameter
     ----------
     obj : AnsMath object
         Math object.
